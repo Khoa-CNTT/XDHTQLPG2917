@@ -1,59 +1,138 @@
-"use client"
+"use client";
 
-import {fullcalendarEvents } from "../lib/data";
+import { useState, useEffect } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import viLocale from "@fullcalendar/core/locales/vi";
-import { useEffect, useState } from 'react';
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faFilter } from "@fortawesome/free-solid-svg-icons";
+import FormModal from "./FormModal";
+import TableSearch from "./TableSearch";
 import EventDetails from "./EventDetails";
+import { useMyContext } from "@/contexts/useContext";
+import { toast } from "react-toastify";
 
+interface ScheduleEvent {
+  id: string;
+  start: string;
+  end: string;
+  title: string;
+  extendedProps: {
+    student: string;
+    trainer: string;
+    exercises: { id: number; name: string; muscleGroup: string; reps: number; sets: number; description: string }[];
+    package?: string;
+    packageType?: string;
+    studentId?: number;
+    trainerId?: number;
+    packageId?: number;
+    programId?: number;
+    classId?: number;
+    note?: string;
+  };
+}
 
 const FullCalendars = () => {
-  const [currentStartDate, setCurrentStartDate] = useState<Date>(new Date());
-  const [events, setEvents] = useState(fullcalendarEvents.map(event=>({
-    ...event,// Sao chép toàn bộ thuộc tính từ `event`
-    id: event.id.toString(),
-  })));
+  const { user } = useMyContext();
+  const [events, setEvents] = useState<ScheduleEvent[]>([]);
+  const [filteredEvents, setFilteredEvents] = useState<ScheduleEvent[]>([]);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string>("");
 
-  const handleDatesSet = (info: any) => {
-    setCurrentStartDate(new Date(info.start));
+  // Lấy dữ liệu từ API
+  const fetchSchedules = async () => {
+    try {
+      const response = await fetch("/api/schedule", {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!response.ok) {
+        throw new Error("Không thể lấy dữ liệu lịch tập");
+      }
+
+      const data: ScheduleEvent[] = await response.json();
+      setEvents(data);
+      setFilteredEvents(data);
+    } catch (err: any) {
+      setError(err.message);
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    const startOfWeek = new Date(currentStartDate);
-    startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay() + 1); // Thứ 2
-    startOfWeek.setHours(0, 0, 0, 0);
+    fetchSchedules();
+  }, []);
 
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6); // Chủ Nhật
-    endOfWeek.setHours(23, 59, 59, 999);
+  // Lọc sự kiện khi searchQuery thay đổi
+  useEffect(() => {
+    if (!searchQuery) {
+      setFilteredEvents(events);
+    } else {
+      const lowerQuery = searchQuery.toLowerCase();
+      const filtered = events.filter((event) => {
+        return (
+          event.title.toLowerCase().includes(lowerQuery) ||
+          event.extendedProps.student.toLowerCase().includes(lowerQuery) ||
+          event.extendedProps.trainer.toLowerCase().includes(lowerQuery) ||
+          event.extendedProps.exercises.some(
+            (ex) =>
+              ex.name.toLowerCase().includes(lowerQuery) ||
+              ex.muscleGroup.toLowerCase().includes(lowerQuery) ||
+              ex.description.toLowerCase().includes(lowerQuery)
+          )
+        );
+      });
+      setFilteredEvents(filtered);
+    }
+  }, [searchQuery, events]);
 
-    // Lọc sự kiện trong tuần
-    const filteredEvents = fullcalendarEvents.filter((event) => {
-      const eventDate = new Date(event.start);
-      return eventDate >= startOfWeek && eventDate <= endOfWeek;
-    });
-
-    setEvents(filteredEvents.map((event) => ({
-      ...event,
-      id: event.id.toString(),
-    })));
-  }, [currentStartDate]);
-
-  const [selectedEvent, setSelectedEvent] = useState<any>(null);
-  const handleEventClick = (info: any) => {
-    const detailId = info.event.id;
-    setSelectedEvent(detailId); 
+  // Xử lý tìm kiếm
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
   };
+
+  // Xử lý sự kiện click trên lịch
+  const handleEventClick = (info: any) => {
+    setSelectedEvent(info.event.id);
+  };
+
+  // Làm mới dữ liệu khi form thành công
+  const handleFormSuccess = () => {
+    fetchSchedules();
+    toast.success("Thao tác thành công!");
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Đang tải...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-red-500">{error}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="">
+    <div className="p-6">
+      <h1 className="text-2xl font-bold text-center mb-8">LỊCH TẬP</h1>
       <FullCalendar
         plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
         initialView="timeGridWeek"
         locale={viLocale}
-        events={events}
+        events={filteredEvents}
         eventClick={handleEventClick}
         height="auto"
         slotEventOverlap={false}
@@ -61,32 +140,36 @@ const FullCalendars = () => {
         dayMaxEventRows={true}
         eventContent={(eventInfo) => (
           <div className="flex flex-col justify-center items-center h-full text-center">
-            <div>
-              {eventInfo.event.start ? new Date(eventInfo.event.start).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              }):"N/A"} - 
-              {eventInfo.event.end ? new Date(eventInfo.event.end).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              }):"N/A"}
-              </div>
+            {eventInfo.event.start && eventInfo.event.end && (
+              <>
+                {new Date(eventInfo.event.start).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}{" "}
+                -{" "}
+                {new Date(eventInfo.event.end).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </>
+            )}
+
             <div>HLV: {eventInfo.event.extendedProps.trainer}</div>
-            <div>Bài Tập: {eventInfo.event.title}</div>
+            <div>Bài tập: {eventInfo.event.title}</div>
           </div>
         )}
-        slotMinTime="05:00:00" 
-        slotMaxTime="20:00:00" 
+        slotMinTime="05:00:00"
+        slotMaxTime="20:00:00"
         allDaySlot={false}
         headerToolbar={{
           left: "prev,next today",
           center: "title",
           right: "timeGridWeek,timeGridDay",
         }}
-        datesSet={handleDatesSet}
       />
-      <div className="">
-        <EventDetails selectedId={selectedEvent} events={events}/>
+
+      <div className="mt-8">
+        <EventDetails selectedId={selectedEvent} events={filteredEvents} onFormSuccess={handleFormSuccess} />
       </div>
     </div>
   );
